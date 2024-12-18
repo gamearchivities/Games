@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Archive Web App</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+  </head>
+  <body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto py-8">
+      <header class="mb-8 text-center">
+        <h1 class="text-4xl font-bold text-blue-400">Game Archive</h1>
+        <p class="text-gray-300">Manage your game uploads and host HTML-based games easily.</p>
+      </header>
+      <main>
+        <section class="mb-8">
+          <div class="relative inline-block">
+            <input type="file" id="file-upload" accept=".exe,.dll,.html,.css,.js" multiple class="absolute inset-0 opacity-0 cursor-pointer" />
+            <button id="upload-btn" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg flex items-center">
+              <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16 16v6H8v-6m4-6v10M12 3v10m0-10l5 5m-5-5L7 8"></path>
+              </svg> Upload Game </button>
+          </div>
+        </section>
+        <section id="unapproved-section" class="mb-8 hidden">
+          <h2 class="text-xl font-bold text-blue-400 mb-4">Unapproved Games</h2>
+          <div id="unapproved-games" class="space-y-4">
+            <!-- Unapproved games will be dynamically injected here -->
+          </div>
+        </section>
+        <section id="approved-section" class="mb-8 hidden">
+          <h2 class="text-xl font-bold text-blue-400 mb-4">Approved Games</h2>
+          <div id="approved-games" class="grid grid-cols-3 gap-4">
+            <!-- Approved games will be dynamically injected here -->
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      const ALLOWED_FILE_TYPES = ['.exe', '.dll', '.html', '.css', '.js'];
+      // DOM elements
+      const fileUploadInput = document.getElementById('file-upload');
+      const unapprovedSection = document.getElementById('unapproved-section');
+      const unapprovedGamesContainer = document.getElementById('unapproved-games');
+      const approvedSection = document.getElementById('approved-section');
+      const approvedGamesContainer = document.getElementById('approved-games');
+      const uploadedFiles = [];
+      const unapprovedGames = [];
+      const renderGame = (game, isApproved) => {
+        const container = document.createElement('div');
+        container.className = `p-4 bg-gray-700 rounded-lg flex justify-between items-center`;
+        const name = document.createElement('span');
+        name.textContent = game.name;
+        container.appendChild(name);
+        if (game.warning) {
+          const warning = document.createElement('span');
+          warning.className = 'text-yellow-500';
+          warning.textContent = game.warning;
+          container.appendChild(warning);
+        }
+        if (!isApproved) {
+          const approveButton = document.createElement('button');
+          approveButton.textContent = 'Approve';
+          approveButton.className = 'bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded-lg';
+          approveButton.onclick = () => approveGame(game.id);
+          container.appendChild(approveButton);
+        }
+        return container;
+      };
+      const handleFileUpload = (event) => {
+        const files = Array.from(event.target.files);
+        files.forEach(file => {
+          const extension = `.${file.name.split('.').pop().toLowerCase()}`;
+          if (ALLOWED_FILE_TYPES.includes(extension)) {
+            const game = {
+              id: Date.now() + Math.random().toString(36).substr(2, 9),
+              name: file.name,
+              type: extension,
+              warning: extension === '.dll' ? 'Potential malware risk - Library file' : null
+            };
+            unapprovedGames.push(game);
+          }
+        });
+        unapprovedSection.classList.remove('hidden');
+        renderUnapprovedGames();
+      };
+      const renderUnapprovedGames = () => {
+        unapprovedGamesContainer.innerHTML = '';
+        unapprovedGames.forEach(game => {
+          unapprovedGamesContainer.appendChild(renderGame(game, false));
+        });
+      };
+      const http = require('http');
+      let hostedFiles = {};
+      const approveGame = (gameId) => {
+        const approvedGame = unapprovedGames.find(game => game.id === gameId);
+        if (approvedGame) {
+          if (approvedGame.type === 'html') {
+            const fileReader = new FileReader();
+            fileReader.onload = (event) => {
+              const fileContent = event.target.result;
+              // Host the HTML file dynamically by saving it in the `hostedFiles` object
+              hostedFiles[`/${approvedGame.file.name}`] = fileContent;
+              // Start a local server
+              if (!global.serverStarted) {
+                global.serverStarted = true; // Avoid restarting the server for every approval
+                const server = http.createServer((req, res) => {
+                  const url = req.url === '/' ? '/index.html' : req.url;
+                  if (hostedFiles[url]) {
+                    res.writeHead(200, {
+                      'Content-Type': 'text/html'
+                    });
+                    res.end(hostedFiles[url]);
+                  } else {
+                    res.writeHead(404, {
+                      'Content-Type': 'text/plain'
+                    });
+                    res.end('File not found');
+                  }
+                });
+                const PORT = 8080;
+                server.listen(PORT, () => {
+                  console.log(`Server running at http://localhost:${PORT}/`);
+                });
+              }
+              // Notify the user of the hosted URL
+              alert(`Hosting HTML-based game at http://localhost:8080/${approvedGame.file.name}`);
+            };
+            fileReader.readAsText(approvedGame.file);
+          } else {
+            alert(`Downloading file: ${approvedGame.file.name}`);
+            const fileURL = URL.createObjectURL(approvedGame.file);
+            const link = document.createElement('a');
+            link.href = fileURL;
+            link.download = approvedGame.file.name;
+            link.click();
+          }
+          // Remove the approved game from the unapproved list
+          setUnapprovedGames(unapprovedGames.filter(game => game.id !== gameId));
+          setUploadedFiles([...uploadedFiles, approvedGame]);
+        }
+      };
+      const renderApprovedGames = () => {
+        approvedGamesContainer.innerHTML = '';
+        uploadedFiles.forEach(game => {
+          approvedGamesContainer.appendChild(renderGame(game, true));
+        });
+      };
+      fileUploadInput.addEventListener('change', handleFileUpload);
+    </script>
+  </body>
+</html>
